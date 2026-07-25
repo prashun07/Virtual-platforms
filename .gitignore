@@ -4,6 +4,7 @@
 !Timer/*.cpp
 !Timer/*.vcd
 !README.md
+!Setup.md
 !.gitignore
 Timer/timer_register.h
 
