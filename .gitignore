@@ -1,0 +1,9 @@
+*
+!Timer
+!Timer/*.h
+!Timer/*.cpp
+!Timer/*.vcd
+!README.md
+!.gitignore
+Timer/timer_register.h
+

@@ -1,0 +1,246 @@
+$date
+     Jul 25, 2026       11:27:36
+$end
+
+$version
+ SystemC 2.3.4-Accellera --- Jul 25 2026 10:20:25
+$end
+
+$timescale
+     1 ps
+$end
+
+$scope module SystemC $end
+$var wire    1  aaaaa  clk       $end
+$var wire    1  aaaab  rst_n       $end
+$var wire    1  aaaac  load       $end
+$var wire   32  aaaad  load_value [31:0]  $end
+$var wire    1  aaaae  enable       $end
+$var wire   32  aaaaf  count [31:0]  $end
+$var wire    1  aaaag  timeout       $end
+$upscope $end
+$enddefinitions  $end
+
+$comment
+All initial values are dumped below at time 0 sec = 0 timescale units.
+$end
+
+$dumpvars
+1aaaaa
+0aaaab
+0aaaac
+b0 aaaad
+0aaaae
+b0 aaaaf
+0aaaag
+$end
+
+#10000
+0aaaaa
+
+#18000
+1aaaaa
+
+#20000
+0aaaaa
+
+#25000
+1aaaab
+
+#28000
+1aaaaa
+
+#30000
+0aaaaa
+
+#35000
+1aaaac
+b1101010111100 aaaad
+
+#38000
+1aaaaa
+b1101010111100 aaaaf
+
+#40000
+0aaaaa
+
+#45000
+0aaaac
+
+#48000
+1aaaaa
+
+#50000
+0aaaaa
+
+#55000
+1aaaae
+
+#58000
+1aaaaa
+
+#60000
+0aaaaa
+
+#68000
+1aaaaa
+
+#70000
+0aaaaa
+
+#78000
+1aaaaa
+
+#80000
+0aaaaa
+
+#88000
+1aaaaa
+
+#90000
+0aaaaa
+
+#98000
+1aaaaa
+
+#100000
+0aaaaa
+
+#108000
+1aaaaa
+
+#110000
+0aaaaa
+
+#118000
+1aaaaa
+
+#120000
+0aaaaa
+
+#125000
+1aaaac
+b11 aaaad
+
+#128000
+1aaaaa
+b11 aaaaf
+
+#130000
+0aaaaa
+
+#135000
+0aaaac
+
+#138000
+1aaaaa
+b10 aaaaf
+
+#140000
+0aaaaa
+
+#148000
+1aaaaa
+b1 aaaaf
+
+#150000
+0aaaaa
+
+#158000
+1aaaaa
+b0 aaaaf
+1aaaag
+
+#160000
+0aaaaa
+
+#168000
+1aaaaa
+0aaaag
+
+#170000
+0aaaaa
+
+#178000
+1aaaaa
+
+#180000
+0aaaaa
+
+#185000
+1aaaac
+b100 aaaad
+
+#188000
+1aaaaa
+b100 aaaaf
+
+#190000
+0aaaaa
+
+#195000
+0aaaac
+
+#198000
+1aaaaa
+b11 aaaaf
+
+#200000
+0aaaaa
+
+#208000
+1aaaaa
+b10 aaaaf
+
+#210000
+0aaaaa
+
+#215000
+0aaaae
+
+#218000
+1aaaaa
+
+#220000
+0aaaaa
+
+#228000
+1aaaaa
+
+#230000
+0aaaaa
+
+#238000
+1aaaaa
+
+#240000
+0aaaaa
+
+#245000
+1aaaae
+
+#248000
+1aaaaa
+
+#250000
+0aaaaa
+
+#258000
+1aaaaa
+
+#260000
+0aaaaa
+
+#268000
+1aaaaa
+
+#270000
+0aaaaa
+
+#278000
+1aaaaa
+
+#280000
+0aaaaa
+
+#285000
