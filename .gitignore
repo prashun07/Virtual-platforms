@@ -3,8 +3,14 @@
 !Timer/*.h
 !Timer/*.cpp
 !Timer/*.vcd
+!qemu_soc
+!qemu_soc/**
 !README.md
 !Setup.md
 !.gitignore
 Timer/timer_register.h
 
+qemu_soc/firmware/*.o
+qemu_soc/firmware/*.elf
+qemu_soc/firmware/*.bin
+qemu_soc/platform/cosim_platform
