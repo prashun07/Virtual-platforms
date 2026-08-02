@@ -9,7 +9,13 @@ SOCKET="${SYSTEMC_COSIM_SOCKET:-/tmp/systemc_cosim.sock}"
 SYSTEMC_LIBDIR="${SYSTEMC_LIBDIR:-${SYSTEMC_HOME:-$HOME/systemc/install}/lib}"
 
 if [[ ! -x "${QEMU_BIN}" ]]; then
-  echo "error: ${QEMU_BIN} not found — run ./scripts/build_qemu.sh first"
+  echo "error: ${QEMU_BIN} not found"
+  echo
+  echo "Build the custom QEMU first (includes the systemc-soc machine):"
+  echo "  ./scripts/build_qemu.sh"
+  echo
+  echo "Homebrew qemu-system-arm cannot be used here — it does not include"
+  echo "the remote-mmio bridge or systemc-soc machine."
   exit 1
 fi
 

@@ -10,7 +10,28 @@ BUILD_DIR="${QEMU_BUILD_DIR:-$HOME/qemu-systemc-build}"
 PREFIX="${QEMU_PREFIX:-$HOME/qemu-systemc}"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
+# Use Apple toolchain (Homebrew LLVM can break QEMU configure on macOS).
+export CC="${CC:-/usr/bin/cc}"
+export CXX="${CXX:-/usr/bin/c++}"
+export OBJC="${OBJC:-/usr/bin/cc}"
+export AR="${AR:-/usr/bin/ar}"
+export SDKROOT="${SDKROOT:-$(xcrun --show-sdk-path 2>/dev/null || true)}"
+export PYTHON="${PYTHON:-/opt/homebrew/bin/python3}"
+# Keep Homebrew LLVM off PATH so Meson does not pick it for Objective-C.
+export PATH="$(printf '%s\n' "$PATH" | tr ':' '\n' | grep -v '/opt/homebrew/opt/llvm' | paste -sd: -)"
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing '$1' — install with: brew install $2"
+    exit 1
+  fi
+}
+
+need_cmd ninja ninja
+need_cmd pkg-config pkg-config
+
 echo "==> QEMU ${QEMU_VERSION} (remote-mmio bridge) -> ${PREFIX}"
+echo "    CC=${CC} OBJC=${OBJC}  SDKROOT=${SDKROOT:-<unset>}"
 
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
   git clone --depth 1 --branch "${QEMU_VERSION}" \
@@ -72,6 +93,7 @@ mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
 if [[ ! -f build.ninja ]]; then
+  rm -rf "${BUILD_DIR:?}/"*
   "${SRC_DIR}/configure" \
     --prefix="${PREFIX}" \
     --target-list=arm-softmmu \
