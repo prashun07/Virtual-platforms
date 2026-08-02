@@ -29,6 +29,6 @@ make -C platform          # SystemC cosim executable
 The detailed SoC architecture (CPU, memory map, Timer↔QEMU data path,
 cosim protocol, boot sequence) is documented in the project root:
 
-**[`../README.md` — Virtual SoC Simulation Blueprint (QEMU + SystemC)](../README.md#virtual-soc-simulation-blueprint-qemu--systemc)**
+**[`../README.md` — §6 Class & Function Call Chain](../README.md#6-class--function-call-chain--who-calls-the-timer)**
 
 Also see [`../Setup.md`](../Setup.md) for prerequisites and how to plug in a new model.

@@ -336,7 +336,223 @@ Read path is symmetric (`COSIM_OP_READ`): firmware `LDR` → bridge → adapter 
 
 So: **CPU time** is QEMU guest time; **peripheral time** is SystemC time. They are loosely synchronized at MMIO and idle-poll boundaries (functional cosimulation, not cycle-locked RTL cosim).
 
-## 6. Component responsibilities (who owns what)
+## 6. Class & Function Call Chain — Who Calls the Timer?
+
+This section answers: **which classes and functions actually reach the user `Timer` model**, and in what order.
+
+### 6.1 Object hierarchy (SystemC side)
+
+The Timer is **never called directly from QEMU**. It is reached only through SystemC signals wired in `sc_main`:
+
+```text
+sc_main()                          [platform/cosim_main.cpp]
+  │
+  ├── sc_clock              clk
+  ├── PeripheralBusSignals  bus          (shared signal bundle)
+  ├── Timer                 dut          ← USER MODEL (Timer/timer.h)
+  ├── MmioAdapter           adapter      (wrapper/mmio_adapter.h)
+  └── CosimServer           server       (wrapper/cosim_server.cpp)
+        server.adapter ───────────────► &adapter
+```
+
+Wiring functions (called once at startup):
+
+| Function | File | What it connects |
+|----------|------|------------------|
+| `bind_peripheral(dut, clk, bus)` | `wrapper/peripheral_if.h` | `Timer` ports ↔ `PeripheralBusSignals` |
+| `bind_adapter(adapter, bus)` | `wrapper/mmio_adapter.h` | `MmioAdapter` outputs ↔ same bus signals |
+| `server.adapter = &adapter` | `platform/cosim_main.cpp` | `CosimServer` holds pointer to adapter |
+
+After binding, `MmioAdapter` and `Timer` share the same `read_en`, `write_en`, `address`, `data_in`, `data_out` signals. The adapter drives the bus; the Timer reacts.
+
+### 6.2 Class diagram (QEMU + SystemC)
+
+```mermaid
+classDiagram
+    direction TB
+
+  class main {
+    <<firmware>>
+    +main()
+    +wait_bit()
+  }
+
+  class RemoteMmioState {
+    <<QEMU device>>
+    +remote_mmio_read()
+    +remote_mmio_write()
+    +remote_mmio_transact()
+    +remote_mmio_connect()
+  }
+
+  class systemc_soc {
+    <<QEMU machine>>
+    +systemc_soc_init()
+  }
+
+  class CosimServer {
+    <<SC_MODULE>>
+    +server_thread()
+    +start_listening()
+    +adapter: MmioAdapter*
+  }
+
+  class MmioAdapter {
+    <<SC_MODULE>>
+    +bus_read(offset)
+    +bus_write(offset, value)
+    +tick_clocks(n)
+  }
+
+  class Timer {
+    <<SC_MODULE user model>>
+    +bus_thread()
+    +timer_thread()
+    +reset_method()
+  }
+
+  class PeripheralBusSignals {
+    <<struct>>
+    reset, read_en, write_en
+    address, data_in, data_out
+    intr1, intr2
+  }
+
+  main --> RemoteMmioState : MMIO load/store\n0x40000000
+  systemc_soc --> RemoteMmioState : creates + maps
+  RemoteMmioState --> CosimServer : Unix socket\nCosimRequest/Response
+  CosimServer --> MmioAdapter : bus_read / bus_write
+  MmioAdapter --> PeripheralBusSignals : drives pins
+  Timer --> PeripheralBusSignals : sensitive to pins
+```
+
+### 6.3 Complete call chain (WRITE example)
+
+Firmware assignment `TIMER_REG_CTRL = value` expands to a store to `0x40000000`:
+
+| Step | Layer | Class / Unit | Function | Calls next |
+|------|-------|--------------|----------|------------|
+| 1 | Guest SW | — | `main()` | writes `TIMER_REG_CTRL` macro |
+| 2 | Guest SW | — | `TIMER_REG_CTRL` | `*(volatile uint32_t*)0x40000000 = value` |
+| 3 | QEMU CPU | TCG / memory | (CPU store) | dispatches to MMIO region |
+| 4 | QEMU device | `RemoteMmioState` | `remote_mmio_write()` | `remote_mmio_transact(WRITE, …)` |
+| 5 | QEMU device | `RemoteMmioState` | `remote_mmio_transact()` | `send()` CosimRequest on socket |
+| 6 | SystemC | `CosimServer` | `server_thread()` | `recv()` request |
+| 7 | SystemC | `CosimServer` | `server_thread()` | `adapter->bus_write(addr, data)` |
+| 8 | SystemC | `MmioAdapter` | `bus_write()` | drives `address`, `data_in`, `write_en` signals |
+| 9 | SystemC | `Timer` | `bus_thread()` | wakes on `write_en` edge |
+| 10 | SystemC | `Timer` | `bus_thread()` | `timer_cntrl.write(data_in.read())` for offset `0x0` |
+
+**Inside the Timer model** (after step 10), these methods run independently on their own sensitivity:
+
+| Method | Trigger | Role |
+|--------|---------|------|
+| `bus_thread()` | `read_en`, `write_en` | Register read/write decode |
+| `timer_thread()` | `clock.pos()` | Increment counter, compare, overflow |
+| `reset_method()` | `reset` | Clear registers and state |
+
+The **only entry point from QEMU into the Timer** is `Timer::bus_thread()` (via signal changes from `MmioAdapter::bus_write` / `bus_read`). QEMU never calls `timer_thread()` directly; that runs on `sc_clock` edges once the control register enables the timer.
+
+### 6.4 Complete call chain (READ example)
+
+Firmware read `TIMER_REG_INTR` (`0x4000000C`):
+
+```text
+main()
+  └─► wait_bit(&TIMER_REG_INTR, …)     // polls INTR register
+        └─► volatile load @ 0x4000000C
+              └─► QEMU: remote_mmio_read()
+                    └─► remote_mmio_transact(READ, addr=0xC)
+                          └─► CosimServer::server_thread()
+                                └─► MmioAdapter::bus_read(0xC)
+                                      └─► drives read_en, address
+                                            └─► Timer::bus_thread()
+                                                  └─► data_out.write(timer_intr.read())
+                                                        └─► value returned up the chain
+```
+
+### 6.5 Sequence diagram (MMIO write → Timer)
+
+```mermaid
+sequenceDiagram
+    participant FW as main()<br/>firmware/main.c
+    participant CPU as Cortex-M3<br/>QEMU TCG
+    participant RMM as RemoteMmioState<br/>remote_mmio.c
+    participant SOCK as Unix socket
+    participant CS as CosimServer<br/>server_thread()
+    participant AD as MmioAdapter<br/>bus_write()
+    participant BUS as PeripheralBusSignals
+    participant TM as Timer<br/>bus_thread()
+
+    FW->>CPU: TIMER_REG_CTRL = value<br/>(store 0x40000000)
+    CPU->>RMM: remote_mmio_write(offset=0, value)
+    RMM->>RMM: remote_mmio_transact(WRITE)
+    RMM->>SOCK: send(CosimRequest)
+    SOCK->>CS: recv(request)
+    CS->>AD: bus_write(0, value)
+    AD->>BUS: address, data_in, write_en=1
+    BUS->>TM: signal update (write_en)
+    TM->>TM: timer_cntrl.write(value)
+    AD->>BUS: write_en=0
+    CS->>SOCK: send(CosimResponse OK)
+    SOCK->>RMM: recv(response)
+    RMM->>CPU: store complete
+    CPU->>FW: continue execution
+
+    Note over TM: timer_thread() runs separately<br/>on sc_clock edges when enabled
+```
+
+### 6.6 Sequence diagram (Timer counting in background)
+
+While firmware polls `TIMER_REG_INTR`, the counter advances without further MMIO writes:
+
+```mermaid
+sequenceDiagram
+    participant CLK as sc_clock<br/>10 ns period
+    participant TM as Timer<br/>timer_thread()
+    participant FW as main()<br/>wait_bit()
+
+    Note over TM: Enabled by earlier bus_thread()<br/>writing CTRL register
+
+    loop each clock edge
+        CLK->>TM: clock.pos()
+        TM->>TM: timer_val++
+        TM->>TM: check compare / overflow
+        TM->>TM: timer_intr.write(status)
+    end
+
+    loop poll loop
+        FW->>FW: read TIMER_REG_INTR<br/>(triggers READ call chain)
+    end
+```
+
+### 6.7 QEMU machine setup (where the bridge is created)
+
+`systemc_soc_init()` in `qemu_soc/qemu/systemc_soc.c` builds the virtual chip. It does **not** know about Timer — only the bridge:
+
+| Function | Creates | Purpose |
+|----------|---------|---------|
+| `systemc_soc_init()` | Flash @ `0x00000000` | Code region for firmware |
+| `systemc_soc_init()` | SRAM @ `0x20000000` | Stack / data |
+| `systemc_soc_init()` | `TYPE_ARMV7M` | Cortex-M3 + NVIC |
+| `systemc_soc_init()` | `TYPE_REMOTE_MMIO` | Socket bridge @ `0x40000000` |
+| `systemc_soc_init()` | `armv7m_load_kernel()` | Load `timer_fw.elf` into Flash |
+
+### 6.8 Summary: direct vs indirect callers of Timer
+
+| Caller | Directly invokes Timer method? | How it reaches Timer |
+|--------|-------------------------------|----------------------|
+| `main()` (firmware) | No | MMIO store/load → QEMU → socket → adapter → signals |
+| `RemoteMmioState` | No | Socket only; no SystemC awareness |
+| `CosimServer` | No | Calls `MmioAdapter::bus_read/write` |
+| `MmioAdapter` | No | Toggles `read_en`/`write_en`/`address`/`data_in` signals |
+| `Timer::bus_thread()` | **Yes** | Reads/writes `timer_cntrl`, `timer_val`, `timer_cmp`, `timer_intr` |
+| `Timer::timer_thread()` | **Yes** (internal) | Runs on clock; updates counter and interrupt register |
+| `Timer::reset_method()` | **Yes** (internal) | Clears state when `reset` signal is high |
+
+**Bottom line:** The user `Timer` class is instantiated only in `sc_main()` (`cosim_main.cpp`). The **only external stimulus** into the model is through `MmioAdapter` driving the shared bus signals, which activates `Timer::bus_thread()`. All timer counting behavior is internal to `Timer::timer_thread()`.
+
+## 7. Component responsibilities (who owns what)
 
 ```text
 +----------------------+----------------------------------------------+
@@ -362,7 +578,7 @@ clock, reset, read_en, write_en, data_in, address, data_out, intr1, intr2
 
 Documented in `qemu_soc/wrapper/peripheral_if.h`.
 
-## 7. Cosimulation protocol (bridge contract)
+## 8. Cosimulation protocol (bridge contract)
 
 Transport: **Unix domain stream socket** (default `/tmp/systemc_cosim.sock`, override with `SYSTEMC_COSIM_SOCKET`).
 
@@ -382,7 +598,7 @@ CosimResponse: magic | version | status | data
 
 Magic = `SCM1`. This protocol is intentionally peripheral-agnostic.
 
-## 8. Boot and run sequence
+## 9. Boot and run sequence
 
 ```text
 run_cosim.sh
@@ -405,7 +621,7 @@ Inside QEMU after reset:
 4. Each access is fulfilled by the live SystemC Timer  
 5. Firmware polls interrupt status bits and prints PASS/FAIL via semihosting  
 
-## 9. Two simulation modes in this repo
+## 10. Two simulation modes in this repo
 
 | Mode | Command | CPU | Timer implementation |
 |------|---------|-----|----------------------|
@@ -414,7 +630,7 @@ Inside QEMU after reset:
 
 Use the testbench to verify the IP in isolation. Use cosim to verify **software + SoC integration**.
 
-## 10. Design intent / non-goals
+## 11. Design intent / non-goals
 
 **Intent**
 
@@ -428,7 +644,7 @@ Use the testbench to verify the IP in isolation. Use cosim to verify **software 
 * Full production IRQ back-propagation (lines are reserved; firmware currently polls `INTR`)  
 * Modeling UART/GPIO/etc. — only Timer is connected today; the SoC skeleton is ready for more bridges or windows  
 
-## 11. Source map
+## 12. Source map
 
 | Path | Architecture piece |
 |------|--------------------|
