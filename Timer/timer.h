@@ -1,7 +1,7 @@
 #ifndef TIMER_H
 #define TIMER_H
 
-#include <systemc.h>
+#include <systemc>
 #include <iomanip>
 #include "register.h"
 
@@ -77,6 +77,8 @@ SC_MODULE(Timer) {
                 timer_intr.write(timer_intr_val);
             }
         }
+        sc_core::sc_stop();
+        std::cout << "[Timer] Timer thread stopped at " << sc_time_stamp() << std::endl;
     }
     void bus_thread()
     {

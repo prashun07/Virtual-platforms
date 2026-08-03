@@ -28,7 +28,7 @@ int sc_main(int argc, char *argv[])
         socket_path = argv[1];
     }
 
-    sc_clock clk{"clk", 10, SC_NS};
+    sc_clock clk{"clk", 10, SC_NS,0.5,10,SC_NS,false};
 
     PeripheralBusSignals bus;
     Timer dut{"Timer"};
@@ -52,5 +52,6 @@ int sc_main(int argc, char *argv[])
     sc_start();
 
     std::cout << "[platform] cosim finished at " << sc_time_stamp() << std::endl;
+
     return 0;
 }
