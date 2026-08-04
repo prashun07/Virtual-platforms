@@ -15,7 +15,6 @@
 
 CosimServer::CosimServer(sc_module_name name, std::string socket_path)
     : sc_module(name)
-    , adapter(nullptr)
     , socket_path_(std::move(socket_path))
     , listen_fd_(-1)
     , client_fd_(-1)
@@ -156,18 +155,20 @@ void CosimServer::server_thread()
 
         if (req.magic != COSIM_MAGIC || req.version != COSIM_VERSION) {
             resp.status = COSIM_ERROR;
-        } else if (!adapter) {
-            resp.status = COSIM_ERROR;
         } else {
             switch (req.op) {
             case COSIM_OP_READ:
-                resp.data = adapter->bus_read(req.addr);
+                if (!tlm_read(req.addr, resp.data)) {
+                    resp.status = COSIM_ERROR;
+                }
                 break;
             case COSIM_OP_WRITE:
-                adapter->bus_write(req.addr, req.data);
+                if (!tlm_write(req.addr, req.data)) {
+                    resp.status = COSIM_ERROR;
+                }
                 break;
             case COSIM_OP_TICK:
-                adapter->tick_clocks(req.data ? req.data : 1);
+                tlm_tick(req.data ? req.data : 1);
                 break;
             case COSIM_OP_QUIT:
                 quit_ = true;
@@ -187,4 +188,57 @@ void CosimServer::server_thread()
             sc_stop();
         }
     }
+}
+
+bool CosimServer::tlm_read(uint32_t addr, uint32_t &data)
+{
+    tlm::tlm_generic_payload trans;
+    unsigned char buf[4] = {};
+    sc_time delay = SC_ZERO_TIME;
+
+    trans.set_command(tlm::TLM_READ_COMMAND);
+    trans.set_address(addr);
+    trans.set_data_ptr(buf);
+    trans.set_data_length(4);
+    trans.set_streaming_width(4);
+    trans.set_byte_enable_ptr(nullptr);
+    trans.set_dmi_allowed(false);
+    trans.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+    initiator->b_transport(trans, delay);
+    if (trans.is_response_error()) {
+        return false;
+    }
+
+    std::memcpy(&data, buf, 4);
+    return true;
+}
+
+bool CosimServer::tlm_write(uint32_t addr, uint32_t data)
+{
+    tlm::tlm_generic_payload trans;
+    unsigned char buf[4];
+    sc_time delay = SC_ZERO_TIME;
+
+    std::memcpy(buf, &data, 4);
+    trans.set_command(tlm::TLM_WRITE_COMMAND);
+    trans.set_address(addr);
+    trans.set_data_ptr(buf);
+    trans.set_data_length(4);
+    trans.set_streaming_width(4);
+    trans.set_byte_enable_ptr(nullptr);
+    trans.set_dmi_allowed(false);
+    trans.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
+
+    initiator->b_transport(trans, delay);
+    return !trans.is_response_error();
+}
+
+void CosimServer::tlm_tick(unsigned count)
+{
+    sc_time delay = SC_ZERO_TIME;
+    for (unsigned i = 0; i < count; ++i) {
+        wait(10, SC_NS);
+    }
+    (void)delay;
 }

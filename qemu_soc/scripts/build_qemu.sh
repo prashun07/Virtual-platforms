@@ -44,6 +44,7 @@ cp "${ROOT}/qemu/remote_mmio.h"              "${SRC_DIR}/include/hw/misc/remote_
 cp "${ROOT}/protocol/cosim_protocol.h"      "${SRC_DIR}/include/hw/misc/cosim_protocol.h"
 cp "${ROOT}/qemu/remote_mmio.c"             "${SRC_DIR}/hw/misc/remote_mmio.c"
 cp "${ROOT}/qemu/systemc_soc.c"             "${SRC_DIR}/hw/arm/systemc_soc.c"
+cp "${ROOT}/qemu/systemc_ps.c"             "${SRC_DIR}/hw/arm/systemc_ps.c"
 
 if ! grep -q 'REMOTE_MMIO' "${SRC_DIR}/hw/misc/Kconfig"; then
   cat >> "${SRC_DIR}/hw/misc/Kconfig" <<'EOF'
@@ -79,11 +80,32 @@ system_ss.add(when: 'CONFIG_SYSTEMC_SOC', if_true: files('systemc_soc.c'))
 EOF
 fi
 
+if ! grep -q 'SYSTEMC_PS' "${SRC_DIR}/hw/arm/Kconfig"; then
+  cat >> "${SRC_DIR}/hw/arm/Kconfig" <<'EOF'
+
+config SYSTEMC_PS
+    bool
+    default y
+    depends on TCG && ARM
+    select A9MPCORE
+    select PL011
+    select REMOTE_MMIO
+EOF
+fi
+
+if ! grep -q 'systemc_ps.c' "${SRC_DIR}/hw/arm/meson.build"; then
+  cat >> "${SRC_DIR}/hw/arm/meson.build" <<'EOF'
+
+system_ss.add(when: 'CONFIG_SYSTEMC_PS', if_true: files('systemc_ps.c'))
+EOF
+fi
+
 # Refresh sources if the tree already existed from an older setup
 cp "${ROOT}/qemu/remote_mmio.h"         "${SRC_DIR}/include/hw/misc/remote_mmio.h"
 cp "${ROOT}/protocol/cosim_protocol.h" "${SRC_DIR}/include/hw/misc/cosim_protocol.h"
 cp "${ROOT}/qemu/remote_mmio.c"        "${SRC_DIR}/hw/misc/remote_mmio.c"
 cp "${ROOT}/qemu/systemc_soc.c"        "${SRC_DIR}/hw/arm/systemc_soc.c"
+cp "${ROOT}/qemu/systemc_ps.c"        "${SRC_DIR}/hw/arm/systemc_ps.c"
 
 # Drop any previously injected timer model files
 rm -f "${SRC_DIR}/hw/misc/systemc_timer.c" \
@@ -107,4 +129,5 @@ ninja install
 
 echo
 echo "Installed: ${PREFIX}/bin/qemu-system-arm"
-echo "Check: ${PREFIX}/bin/qemu-system-arm -machine help | grep systemc-soc"
+echo "Check:"
+echo "  ${PREFIX}/bin/qemu-system-arm -machine help | grep systemc"

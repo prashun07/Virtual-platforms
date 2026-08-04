@@ -27,7 +27,9 @@ make -C "${ROOT}/platform"
 
 rm -f "${SOCKET}"
 
-echo "==> Starting SystemC side on ${SOCKET}"
+export SYSTEMC_PL_BASE=0x40000000
+
+echo "==> Starting SystemC side (TLM) on ${SOCKET}, PL @ ${SYSTEMC_PL_BASE}"
 DYLD_LIBRARY_PATH="${SYSTEMC_LIBDIR}:${DYLD_LIBRARY_PATH:-}" \
   "${ROOT}/platform/cosim_platform" "${SOCKET}" &
 SC_PID=$!
@@ -58,4 +60,5 @@ export SYSTEMC_COSIM_SOCKET="${SOCKET}"
   -cpu cortex-m3 \
   -kernel "${ROOT}/firmware/timer_fw.elf" \
   -semihosting-config enable=on,target=native \
+  -monitor none \
   -nographic

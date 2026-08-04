@@ -57,7 +57,6 @@ SC_MODULE(Timer) {
     {
         while(true)
         {
-            std::cout<<"Timer thread running..."<<endl;
             wait();
             uint32_t timer_cntrl_val = timer_cntrl.read();
             if((timer_cntrl_val & (1<<ENABLE_BIT)))
@@ -86,7 +85,6 @@ SC_MODULE(Timer) {
         {
             wait();
             uint32_t offset = address.read();
-            std::cout<<"Address offset received is: "<<offset<<endl;
             if(read_en.read())
             {
                 switch (offset)

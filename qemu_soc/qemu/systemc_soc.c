@@ -15,6 +15,7 @@
 #include "hw/boards.h"
 #include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
+#include "hw/qdev-clock.h"
 #include "exec/address-spaces.h"
 #include "system/system.h"
 #include "hw/misc/remote_mmio.h"
@@ -23,6 +24,7 @@
 #define SRAM_SIZE    (128 * 1024)   /* stack, .data, .bss */
 #define BRIDGE_BASE  0x40000000ull  /* guest sees Timer registers here */
 #define BRIDGE_SIZE  0x1000ull      /* 4 KiB MMIO window -> remote-mmio */
+#define HCLK_FRQ     25000000ULL    /* fixed CPU clock (QEMU 10+ requires cpuclk) */
 
 /*
  * systemc_soc_init — machine init callback; builds the virtual SoC.
@@ -39,6 +41,7 @@ static void systemc_soc_init(MachineState *machine)
 {
     DeviceState *armv7m;
     DeviceState *bridge;
+    Clock *sysclk;
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *flash = g_new(MemoryRegion, 1);
     const char *sock = getenv("SYSTEMC_COSIM_SOCKET");
@@ -57,6 +60,13 @@ static void systemc_soc_init(MachineState *machine)
     memory_region_add_subregion(system_memory, 0x20000000, machine->ram);
 
     /*
+     * QEMU 10+ requires armv7m cpuclk to be wired before realize.
+     * Frequency is not critical for functional cosim (TCG is not cycle-accurate).
+     */
+    sysclk = clock_new(OBJECT(machine), "SYSCLK");
+    clock_set_hz(sysclk, HCLK_FRQ);
+
+    /*
      * --- CPU: ARMv7-M (Cortex-M3) + NVIC ---
      * TYPE_ARMV7M wraps the CPU and interrupt controller. Guest firmware
      * vector table at 0x00000000 is handled after kernel load below.
@@ -64,6 +74,7 @@ static void systemc_soc_init(MachineState *machine)
     armv7m = qdev_new(TYPE_ARMV7M);
     qdev_prop_set_uint32(armv7m, "num-irq", 64);
     qdev_prop_set_string(armv7m, "cpu-type", machine->cpu_type);
+    qdev_connect_clock_in(armv7m, "cpuclk", sysclk);
     object_property_set_link(OBJECT(armv7m), "memory",
                              OBJECT(system_memory), &error_abort);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(armv7m), &error_fatal);
