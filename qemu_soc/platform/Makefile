@@ -6,6 +6,7 @@ CXX      ?= clang++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra \
             -I$(SYSTEMC_INCLUDE) \
             -I../wrapper \
+            -I../include \
             -I../../Timer
 LDFLAGS  := -L$(SYSTEMC_LIBDIR) -lsystemc -pthread
 

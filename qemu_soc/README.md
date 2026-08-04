@@ -1,34 +1,56 @@
 # QEMU ↔ SystemC cosimulation bridge
 
 Provides an **interface only** so your SystemC peripherals can be driven by
-baremetal software running on a QEMU ARM Cortex-M3.
+baremetal software running on QEMU. Integration uses **TLM-2.0 sockets**.
 
 No peripheral models live in QEMU. The example platform binds the existing
-user model at `../Timer`.
+user model at `../Timer` through `TlmPinBridge`.
+
+## Two QEMU machines
+
+| Machine | CPU | Use case | Run script |
+|---------|-----|----------|------------|
+| `systemc-soc` | Cortex-M3 | Microcontroller / baremetal M-profile | `./scripts/run_cosim.sh` |
+| `systemc-ps` | Cortex-A9 + UART + GIC + DDR | Application-class PS (scalable) | `./scripts/run_cosim_ps.sh` |
+
+## TLM topology (SystemC side)
 
 ```text
-firmware (ARM) → QEMU remote-mmio → socket → wrapper → your SystemC model
+CosimServer (initiator)
+    └─► TlmAddressMap (decode PL base)
+            └─► TlmPinBridge (TLM target)
+                    └─► Timer (user model, pin-level)
 ```
+
+Set PL base with `SYSTEMC_PL_BASE`:
+- M-profile (`systemc-soc`): `0x40000000`
+- A-profile (`systemc-ps`): `0xF0000000`
+
+See `include/soc_memory_map.h` for the full map.
 
 ## Build / run
 
 ```bash
-./scripts/build_qemu.sh   # once: QEMU with remote-mmio bridge
-./scripts/run_cosim.sh    # baremetal + SystemC Timer cosim
+./scripts/build_qemu.sh      # once — builds both machines
+
+# Cortex-M3 cosim
+./scripts/run_cosim.sh
+
+# Cortex-A9 processing system cosim
+./scripts/run_cosim_ps.sh
 ```
 
 Or build pieces separately:
 
 ```bash
-make -C firmware          # baremetal ELF
-make -C platform          # SystemC cosim executable
+make -C platform             # TLM cosim executable
+make -C firmware             # M-profile ELF
+make -C firmware_ps          # A-profile ELF
 ```
 
-## Architecture blueprint
+## Adding peripherals
 
-The detailed SoC architecture (CPU, memory map, Timer↔QEMU data path,
-cosim protocol, boot sequence) is documented in the project root:
+1. Native TLM model: bind `device_socket` to your `tlm_target_socket`
+2. Legacy pin model (like Timer): add another `TlmPinBridge` + `map_region()`
 
-**[`../README.md` — §6 Class & Function Call Chain](../README.md#6-class--function-call-chain--who-calls-the-timer)**
-
-Also see [`../Setup.md`](../Setup.md) for prerequisites and how to plug in a new model.
+Full architecture: [`../README.md`](../README.md)

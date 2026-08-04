@@ -1,8 +1,12 @@
 /*
- * Cosimulation platform: wires the USER SystemC model to the QEMU bridge.
+ * Cosimulation platform with TLM-2.0 interconnect.
  *
- * To simulate a different peripheral later, replace the Timer include/instance
- * and keep the same bind_peripheral() / MmioAdapter / CosimServer wiring.
+ * Topology:
+ *   CosimServer (TLM initiator) -> TlmAddressMap -> TlmPinBridge -> user Timer
+ *
+ * PL base address must match the QEMU machine (see soc_memory_map.h):
+ *   systemc-soc : 0x40000000
+ *   systemc-ps  : 0xF0000000
  */
 
 #include <cstdlib>
@@ -12,11 +16,21 @@
 #include <systemc.h>
 
 #include "peripheral_if.h"
-#include "mmio_adapter.h"
+#include "tlm_pin_bridge.h"
+#include "tlm_address_map.h"
 #include "cosim_server.h"
+#include "soc_memory_map.h"
 
-/* User model — do not modify; only bind through the wrapper interface. */
 #include "../../Timer/timer.h"
+
+static uint64_t pl_base_from_env()
+{
+    const char *env = std::getenv("SYSTEMC_PL_BASE");
+    if (env && env[0]) {
+        return std::strtoull(env, nullptr, 0);
+    }
+    return SYSTEMC_PL_M_PROFILE_BASE;
+}
 
 int sc_main(int argc, char *argv[])
 {
@@ -28,30 +42,36 @@ int sc_main(int argc, char *argv[])
         socket_path = argv[1];
     }
 
-    sc_clock clk{"clk", 10, SC_NS,0.5,10,SC_NS,false};
+    const uint64_t pl_base = pl_base_from_env();
+
+    sc_clock clk{"clk", 10, SC_NS, 0.5, 10, SC_NS, false};
 
     PeripheralBusSignals bus;
     Timer dut{"Timer"};
     bind_peripheral(dut, clk, bus);
 
-    MmioAdapter adapter{"adapter"};
-    bind_adapter(adapter, bus);
+    TlmPinBridge timer_bridge{"timer_tlm_bridge"};
+    bind_pin_bridge(timer_bridge, bus);
+
+    TlmAddressMap interconnect{"interconnect"};
+    /* QEMU remote-mmio forwards window offsets (0x00..), not absolute PL addresses. */
+    interconnect.map_region(0, SYSTEMC_PL_WINDOW_SIZE);
+    interconnect.device_socket.bind(timer_bridge.socket);
 
     CosimServer server{"cosim", socket_path};
-    server.adapter = &adapter;
+    server.initiator.bind(interconnect.cpu_socket);
     server.start_listening();
 
-    /* Release reset after a couple of clocks. */
     bus.reset.write(true);
     sc_start(20, SC_NS);
     bus.reset.write(false);
 
-    std::cout << "[platform] SystemC model ready; waiting for QEMU on "
-              << socket_path << std::endl;
+    std::cout << "[platform] TLM cosim ready; PL @ 0x"
+              << std::hex << pl_base << std::dec
+              << " socket=" << socket_path << std::endl;
 
     sc_start();
 
     std::cout << "[platform] cosim finished at " << sc_time_stamp() << std::endl;
-
     return 0;
 }

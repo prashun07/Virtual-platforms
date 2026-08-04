@@ -6,21 +6,7 @@
 
 #include <stdint.h>
 #include "timer_regs.h"
-
-static void sh_puts(const char *s)
-{
-    register int op asm("r0") = 0x04; /* SYS_WRITE0 */
-    register const char *arg asm("r1") = s;
-    asm volatile ("bkpt 0xAB" : : "r"(op), "r"(arg) : "memory");
-}
-
-static void sh_exit(int code)
-{
-    uint32_t args[2] = { 0x20026u, (uint32_t)code };
-    register int op asm("r0") = 0x18;
-    register uint32_t *arg asm("r1") = args;
-    asm volatile ("bkpt 0xAB" : : "r"(op), "r"(arg) : "memory");
-}
+#include "semihost.h"
 
 static int wait_bit(volatile uint32_t *reg, uint32_t mask, uint32_t spins)
 {

@@ -53,10 +53,18 @@ Architecture (your model stays in SystemC; QEMU only provides CPU + bridge):
 | Piece | Role |
 |-------|------|
 | `qemu/remote_mmio.*` | Generic MMIO↔socket bridge (no model logic) |
-| `qemu/systemc_soc.c` | Cortex-M3 machine mapping bridge at `0x40000000` |
-| `wrapper/` | Interface that drives your model's bus pins |
-| `platform/cosim_main.cpp` | Instantiates **your** `Timer` and binds the wrapper |
-| `firmware/` | Baremetal image that talks to the model via MMIO |
+| `qemu/systemc_soc.c` | Cortex-M3 machine, PL bridge @ `0x40000000` |
+| `qemu/systemc_ps.c` | Cortex-A9 PS (UART, GIC, DDR), PL @ `0xF0000000` |
+| `wrapper/` | TLM sockets + `TlmPinBridge` to user pin-level models |
+| `platform/cosim_main.cpp` | CosimServer → TlmAddressMap → Timer |
+| `firmware/` | M-profile baremetal |
+| `firmware_ps/` | A-profile baremetal |
+
+### TLM integration
+
+SystemC uses **TLM-2.0** (`CosimServer` initiator → `TlmAddressMap` →
+`TlmPinBridge` → your model). Pin-level models like `Timer` stay unchanged;
+native TLM peripherals can bind directly to the address map later.
 
 ## Step 4: Host tools (macOS)
 
@@ -104,18 +112,31 @@ PASS: timer stopped when disabled
 ALL TESTS COMPLETED
 ```
 
-### Memory map
+### Memory map (Cortex-M3, `systemc-soc`)
 
 | Address    | Region |
 | ---------- | ------ |
 | 0x00000000 | Flash (baremetal) |
 | 0x20000000 | SRAM |
-| 0x40000000 | remote-mmio window → your SystemC model offsets |
+| 0x40000000 | PL window → SystemC TLM (Timer) |
+
+### Cortex-A9 processing system (`systemc-ps`)
+
+```bash
+cd qemu_soc
+./scripts/run_cosim_ps.sh
+```
+
+| Address    | Region |
+| ---------- | ------ |
+| 0x60000000 | DDR |
+| 0x10009000 | PL011 UART |
+| 0xF0000000 | PL window → SystemC TLM (Timer) |
 
 ### Connecting a new custom model later
 
-1. Keep the same pin interface as `Timer` (see `wrapper/peripheral_if.h`)
-2. In `platform/cosim_main.cpp`, include your header and replace the `Timer` instance
-3. Rebuild: `make -C qemu_soc/platform`
-4. Point firmware register headers at your offsets if they differ
-5. Run `./scripts/run_cosim.sh`
+1. **Pin-level** (like Timer): add `TlmPinBridge`, `map_region()`, bind in `cosim_main.cpp`
+2. **Native TLM**: bind your `tlm_target_socket` to `TlmAddressMap::device_socket` (or add a second region)
+3. See `wrapper/peripheral_if.h` for the legacy pin contract
+4. Rebuild: `make -C qemu_soc/platform`
+5. Run `./scripts/run_cosim.sh` (M3) or `./scripts/run_cosim_ps.sh` (A9)

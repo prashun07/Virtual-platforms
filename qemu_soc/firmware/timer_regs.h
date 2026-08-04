@@ -2,9 +2,9 @@
 #define TIMER_REGS_H
 
 #include <stdint.h>
+#include "../include/soc_memory_map.h"
 
-/* Same MMIO layout as systemc_model/Timer (and QEMU systemc-timer device). */
-#define TIMER_BASE        0x40000000u
+#define TIMER_BASE        SYSTEMC_PL_M_PROFILE_BASE
 
 #define TIMER_REG_CTRL    (*(volatile uint32_t *)(TIMER_BASE + 0x00))
 #define TIMER_REG_VALUE   (*(volatile uint32_t *)(TIMER_BASE + 0x04))

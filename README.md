@@ -193,7 +193,7 @@ Two cooperating simulators form one virtual SoC:
 | Process | Role | Owns |
 |--------|------|------|
 | **QEMU** (`qemu-system-arm -M systemc-soc`) | Instruction-accurate CPU + address map | Cortex-M3, Flash, SRAM, NVIC, `remote-mmio` bridge |
-| **SystemC** (`cosim_platform`) | Cycle/event-accurate peripheral | User `Timer` model, `sc_clock`, bus adapter, cosim server |
+| **SystemC** (`cosim_platform`) | Cycle/event-accurate peripheral | User `Timer` model, TLM bus, `TlmPinBridge`, cosim server |
 
 Baremetal firmware runs **on the QEMU CPU** and programs the Timer **exactly as MMIO**, the same way software would on silicon. Every access to the Timer window is forwarded into SystemC, where the real model executes.
 
@@ -208,10 +208,10 @@ Baremetal firmware runs **on the QEMU CPU** and programs the Timer **exactly as 
  │  │  Cortex-M3 CPU (TCG)         │        │  sc_clock (10 ns)          │ │
  │  │       │                      │        │       │                    │ │
  │  │       ▼                      │        │       ▼                    │ │
- │  │  System bus / address space  │        │  MmioAdapter (pin wiggles) │ │
- │  │   ├─ Flash  @ 0x00000000     │        │       │                    │ │
- │  │   ├─ SRAM   @ 0x20000000     │        │       ▼                    │ │
- │  │   └─ Bridge @ 0x40000000 ────┼─Unix───┼─► CosimServer              │ │
+ │  │  System bus / address space  │        │  TLM: CosimServer → Map    │ │
+ │  │   ├─ Flash  @ 0x00000000     │        │       → TlmPinBridge       │ │
+ │  │   ├─ SRAM   @ 0x20000000     │        │       │                    │ │
+ │  │   └─ Bridge @ 0x40000000 ────┼─Unix───┼─► CosimServer (initiator)  │ │
  │  │        remote-mmio           │ socket │       │                    │ │
  │  │                              │        │       ▼                    │ │
  │  │  NVIC (IRQ lines reserved)   │        │  USER MODEL: Timer         │ │
@@ -292,6 +292,21 @@ Offsets are **identical** to the SystemC model (`Timer/timer.h`):
 
 Absolute example: compare register = `0x40000008`.
 
+### Processing system variant (`systemc-ps`)
+
+A second QEMU machine targets **application-class** software development:
+
+| Attribute | `systemc-soc` (M-profile) | `systemc-ps` (A-profile) |
+|-----------|---------------------------|--------------------------|
+| CPU | Cortex-M3 | Cortex-A9 |
+| DRAM | SRAM @ `0x20000000` | DDR @ `0x60000000` |
+| Console | semihosting | PL011 UART @ `0x10009000` |
+| Interrupts | NVIC | GIC (A9 MPCore private) |
+| PL bridge | `0x40000000` | `0xF0000000` |
+| Run script | `run_cosim.sh` | `run_cosim_ps.sh` |
+
+The SystemC side is the same TLM stack; only `SYSTEMC_PL_BASE` and the QEMU machine change.
+
 ## 5. How Timer interacts with QEMU (end-to-end path)
 
 Example: firmware writes `TIMER_REG_CTRL = ENABLE | CMP_EN | OV_EN`.
@@ -308,11 +323,11 @@ Example: firmware writes `TIMER_REG_CTRL = ENABLE | CMP_EN | OV_EN`.
       send() on Unix socket  (/tmp/systemc_cosim.sock by default)
       block until CosimResponse
 
-4. CosimServer (SystemC SC_THREAD)
-      recv request
-      call MmioAdapter::bus_write(0x0, ctrl)
+4. CosimServer (SystemC SC_THREAD, TLM initiator)
+      recv request → b_transport() on TlmAddressMap
 
-5. MmioAdapter (wrapper only)
+5. TlmAddressMap → TlmPinBridge (TLM target)
+      decode PL base, forward transaction
       drive pins: address, data_in, write_en=1
       wait delta / one clock period
 
@@ -900,8 +915,7 @@ Current limitations include:
 * No interrupt masking
 * No interrupt controller integration
 * No DMA triggering
-* No TLM-2.0 sockets
-* No timing annotation
+* No timing annotation on TLM transactions
 * Limited error handling
 * Simplified register permissions
 
@@ -923,14 +937,11 @@ Planned enhancements include:
 
 ---
 
-## TLM-2.0 Support
+## TLM-2.0 Support (partial)
 
-* Target Socket
-* Generic Payload
-* DMI Support
-* Timing Annotation
-* Loosely Timed Modeling
-* Approximately Timed Modeling
+* Target/initiator sockets via `TlmAddressMap` and `TlmPinBridge`
+* Generic payload read/write from QEMU cosim protocol
+* DMI, loosely/approximately timed modeling — planned
 
 ---
 
