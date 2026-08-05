@@ -32,6 +32,9 @@ static constexpr uint32_t TIMER_OVF_COUNT = 0xFFu;
  *
  * INTR register: hardware sets bits on events; software clears by writing
  * the register with those bits cleared (see firmware main.c).
+ *
+ * irq_output_method is the sole driver of intr1/intr2. It runs on clock
+ * edges and when INTR actually changes (irq_changed_ev, not every delta).
  */
 SC_MODULE(Timer) {
     sc_in<bool>          clock;
@@ -50,8 +53,7 @@ SC_MODULE(Timer) {
     uint32_t timer_val;
     uint32_t timer_cmp;
 
-    sc_mutex state_mtx;
-    sc_event irq_update_ev;
+    sc_event irq_changed_ev;
 
     SC_CTOR(Timer) : clock("clock") {
         SC_THREAD(timer_thread);
@@ -68,30 +70,30 @@ SC_MODULE(Timer) {
         SC_METHOD(reset_method);
         sensitive << reset;
 
-        SC_METHOD(drive_irq_outputs);
-        sensitive << irq_update_ev;
+        SC_METHOD(irq_output_method);
+        sensitive << irq_changed_ev << clock.pos();
         dont_initialize();
     }
 
-    void request_irq_update()
+    void irq_output_method()
     {
-        irq_update_ev.notify(SC_ZERO_TIME);
-    }
-
-    void drive_irq_outputs()
-    {
-        state_mtx.lock();
         const uint32_t intr = timer_intr.read();
-        state_mtx.unlock();
-
         intr1.write((intr & INTR_CMP_MASK) != 0);
         intr2.write((intr & INTR_OV_MASK) != 0);
     }
 
-    /* Caller must hold state_mtx. */
+    void commit_intr(uint32_t value)
+    {
+        if (timer_intr.read() == value) {
+            return;
+        }
+        timer_intr.write(value);
+        irq_changed_ev.notify();
+    }
+
     void post_interrupt(uint32_t mask)
     {
-        timer_intr.write(timer_intr.read() | mask);
+        commit_intr(timer_intr.read() | mask);
     }
 
     void reset_method()
@@ -100,14 +102,10 @@ SC_MODULE(Timer) {
             return;
         }
 
-        state_mtx.lock();
         timer_cntrl.reset();
         timer_val = 0;
         timer_cmp = 0;
-        timer_intr.reset();
-        state_mtx.unlock();
-
-        request_irq_update();
+        commit_intr(0);
     }
 
     void bus_read_method()
@@ -119,7 +117,6 @@ SC_MODULE(Timer) {
         const uint32_t offset = address.read();
         uint32_t rdata = 0;
 
-        state_mtx.lock();
         switch (offset) {
         case REG_CTRL:
             rdata = timer_cntrl.read();
@@ -136,7 +133,6 @@ SC_MODULE(Timer) {
         default:
             break;
         }
-        state_mtx.unlock();
 
         data_out.write(rdata);
     }
@@ -149,9 +145,7 @@ SC_MODULE(Timer) {
 
         const uint32_t offset = address.read();
         const uint32_t wdata = data_in.read();
-        bool irq_changed = false;
 
-        state_mtx.lock();
         switch (offset) {
         case REG_CTRL:
             timer_cntrl.write(wdata);
@@ -163,16 +157,10 @@ SC_MODULE(Timer) {
             timer_cmp = wdata;
             break;
         case REG_INTR:
-            timer_intr.write(wdata);
-            irq_changed = true;
+            commit_intr(wdata);
             break;
         default:
             break;
-        }
-        state_mtx.unlock();
-
-        if (irq_changed) {
-            request_irq_update();
         }
     }
 
@@ -181,11 +169,8 @@ SC_MODULE(Timer) {
         while (true) {
             wait();
 
-            state_mtx.lock();
-
             const uint32_t ctrl = timer_cntrl.read();
             if (!(ctrl & (1u << ENABLE_BIT))) {
-                state_mtx.unlock();
                 continue;
             }
 
@@ -202,12 +187,6 @@ SC_MODULE(Timer) {
 
             if (pending != 0) {
                 post_interrupt(pending);
-            }
-
-            state_mtx.unlock();
-
-            if (pending != 0) {
-                request_irq_update();
             }
         }
     }
