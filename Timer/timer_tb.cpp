@@ -58,11 +58,11 @@ SC_MODULE(Timer_tb)
 
     void write_reg(uint32_t address,uint32_t value)
     {
+        wait(clk.posedge_event());
         addr.write(address);
         data_in.write(value);
-
         write_en.write(true);
-        wait(1,SC_NS);
+        wait(clk.posedge_event());
         write_en.write(false);
 
         cout<<"[WRITE] Addr=0x"
@@ -74,13 +74,11 @@ SC_MODULE(Timer_tb)
 
     uint32_t read_reg(uint32_t address)
     {
+        wait(clk.posedge_event());
         addr.write(address);
-
         read_en.write(true);
-        wait(1,SC_NS);
-
-        uint32_t value=data_out.read();
-
+        wait(clk.posedge_event());
+        const uint32_t value = data_out.read();
         read_en.write(false);
 
         cout<<"[READ ] Addr=0x"
@@ -175,13 +173,35 @@ SC_MODULE(Timer_tb)
 
         cout<<"\nTEST5 : Compare Interrupt\n";
 
-        write_reg(0x8,10);
+        write_reg(0x0, 0);
+        write_reg(0x4, 0);
+        write_reg(0xC, 0);
+        write_reg(0x8, 10);
+        write_reg(0x0, 0x7);
 
-        write_reg(0x0,1);
+        bool cmp_seen = false;
+        for (int i = 0; i < 200; ++i) {
+            wait(10, SC_NS);
+            if (read_reg(0xC) & 0x2u) {
+                cmp_seen = true;
+                break;
+            }
+        }
 
-        wait(10,SC_NS);
+        if (cmp_seen && intr1.read()) {
+            cout<<"PASS : Compare IRQ asserted on intr1\n";
+        } else {
+            cout<<"FAIL : Compare IRQ (status=" << cmp_seen
+                << " pin=" << intr1.read() << ")\n";
+        }
 
-        read_reg(0xC);
+        write_reg(0xC, read_reg(0xC) & ~0x2u);
+
+        if (!intr1.read()) {
+            cout<<"PASS : Compare IRQ cleared on intr1\n";
+        } else {
+            cout<<"FAIL : Compare IRQ still asserted on intr1\n";
+        }
 
         //-----------------------------------
         // Test6 Overflow
@@ -189,13 +209,34 @@ SC_MODULE(Timer_tb)
 
         cout<<"\nTEST6 : Overflow\n";
 
-        write_reg(0x4,250);
+        write_reg(0x0, 0);
+        write_reg(0xC, 0);
+        write_reg(0x0, 0x7);
+        write_reg(0x4, 250);
 
-        wait(10,SC_NS);
+        bool ov_seen = false;
+        for (int i = 0; i < 200; ++i) {
+            wait(10, SC_NS);
+            if (read_reg(0xC) & 0x4u) {
+                ov_seen = true;
+                break;
+            }
+        }
 
-        read_reg(0x4);
+        if (ov_seen && intr2.read()) {
+            cout<<"PASS : Overflow IRQ asserted on intr2\n";
+        } else {
+            cout<<"FAIL : Overflow IRQ (status=" << ov_seen
+                << " pin=" << intr2.read() << ")\n";
+        }
 
-        read_reg(0xC);
+        write_reg(0xC, read_reg(0xC) & ~0x4u);
+
+        if (!intr2.read()) {
+            cout<<"PASS : Overflow IRQ cleared on intr2\n";
+        } else {
+            cout<<"FAIL : Overflow IRQ still asserted on intr2\n";
+        }
 
         //-----------------------------------
         // Test7 Disable Timer
