@@ -1,5 +1,17 @@
 # SystemC Model Setup Instructions
 
+## Repository layout
+
+```text
+systemc_model/
+  scripts/              # build_qemu.sh, run_platform.sh, run_cosim.sh
+  platforms/            # cosim harness + firmware per target (e.g. basic_cortexM)
+  Timer/                # user SystemC IP (no QEMU dependency)
+  qemu_soc/             # generic bridge, wrapper, QEMU patches only
+```
+
+Models and cosim bridge are **independent**. A platform under `platforms/` connects them at run time.
+
 ## Step 1: Build SystemC from source
 
 ```bash
@@ -18,7 +30,7 @@ make -j$(sysctl -n hw.ncpu) && make install
 ```bash
 export SYSTEMC_HOME=$HOME/systemc/install
 export SYSTEMC_INCLUDE=$SYSTEMC_HOME/include
-export SYSTEMC_LIBDIR=$SYSTEMC_HOME/lib
+export SYSTEMC_LIBDIR=$HOME/systemc/install/lib
 export QEMU_PREFIX=$HOME/qemu-systemc
 export PATH="$QEMU_PREFIX/bin:$PATH"
 ```
@@ -40,31 +52,12 @@ DYLD_LIBRARY_PATH="$SYSTEMC_LIBDIR" ./timer_sim
 
 # QEMU + SystemC cosimulation
 
-Architecture (your model stays in SystemC; QEMU only provides CPU + bridge):
-
-```text
-  baremetal ELF
-       |
-  QEMU Cortex-M3  --remote-mmio-->  Unix socket  -->  SystemC wrapper
-                                                         |
-                                                    user model (Timer)
-```
-
 | Piece | Role |
 |-------|------|
-| `qemu/remote_mmio.*` | Generic MMIO↔socket bridge (no model logic) |
-| `qemu/systemc_soc.c` | Cortex-M3 machine, PL bridge @ `0x40000000` |
-| `qemu/systemc_ps.c` | Cortex-A9 PS (UART, GIC, DDR), PL @ `0xF0000000` |
-| `wrapper/` | TLM sockets + `TlmPinBridge` to user pin-level models |
-| `platform/cosim_main.cpp` | CosimServer → TlmAddressMap → Timer |
-| `firmware/` | M-profile baremetal |
-| `firmware_ps/` | A-profile baremetal |
-
-### TLM integration
-
-SystemC uses **TLM-2.0** (`CosimServer` initiator → `TlmAddressMap` →
-`TlmPinBridge` → your model). Pin-level models like `Timer` stay unchanged;
-native TLM peripherals can bind directly to the address map later.
+| `qemu_soc/qemu/` | QEMU machines + `remote-mmio` bridge |
+| `qemu_soc/wrapper/` | TLM + socket server |
+| `platforms/basic_cortexM/` | M-profile cosim + Timer demo firmware |
+| `platforms/basic_cortexA/` | A-profile cosim + Timer demo firmware |
 
 ## Step 4: Host tools (macOS)
 
@@ -72,71 +65,39 @@ native TLM peripherals can bind directly to the address map later.
 brew install qemu arm-none-eabi-gcc ninja pkg-config glib pixman
 ```
 
-Homebrew QEMU does not include the bridge. Build the local QEMU once:
+Build custom QEMU once:
 
 ```bash
-cd qemu_soc
+cd systemc_model
 chmod +x scripts/*.sh
 ./scripts/build_qemu.sh
 ```
 
-## Step 5: Build the baremetal image
+## Step 5: Run cosimulation
+
+From **`systemc_model/`**:
 
 ```bash
-cd qemu_soc/firmware
-make
-# produces timer_fw.elf / timer_fw.bin
-```
-
-## Step 6: Run cosimulation
-
-```bash
-cd qemu_soc
 ./scripts/run_cosim.sh
+# equivalent: ./scripts/run_platform.sh basic_cortexM
 ```
-
-This will:
-
-1. Build firmware + SystemC platform (links `Timer/timer.h` as-is)
-2. Start the SystemC side (listens on `/tmp/systemc_cosim.sock`)
-3. Start QEMU `systemc-soc` with the baremetal ELF
 
 Expected:
 
 ```text
 [cosim] listening on /tmp/systemc_cosim.sock
-cosim: baremetal <-> QEMU <-> SystemC Timer
+[platform] basic_cortexM ready; PL @ 0x40000000 ...
 PASS: compare status set
-PASS: overflow status set
-PASS: timer stopped when disabled
 ALL TESTS COMPLETED
 ```
 
-### Memory map (Cortex-M3, `systemc-soc`)
-
-| Address    | Region |
-| ---------- | ------ |
-| 0x00000000 | Flash (baremetal) |
-| 0x20000000 | SRAM |
-| 0x40000000 | PL window → SystemC TLM (Timer) |
-
-### Cortex-A9 processing system (`systemc-ps`)
+### Cortex-A9 (`basic_cortexA`)
 
 ```bash
-cd qemu_soc
 ./scripts/run_cosim_ps.sh
+# equivalent: ./scripts/run_platform.sh basic_cortexA
 ```
 
-| Address    | Region |
-| ---------- | ------ |
-| 0x60000000 | DDR |
-| 0x10009000 | PL011 UART |
-| 0xF0000000 | PL window → SystemC TLM (Timer) |
+### Adding a new model
 
-### Connecting a new custom model later
-
-1. **Pin-level** (like Timer): add `TlmPinBridge`, `map_region()`, bind in `cosim_main.cpp`
-2. **Native TLM**: bind your `tlm_target_socket` to `TlmAddressMap::device_socket` (or add a second region)
-3. See `wrapper/peripheral_if.h` for the legacy pin contract
-4. Rebuild: `make -C qemu_soc/platform`
-5. Run `./scripts/run_cosim.sh` (M3) or `./scripts/run_cosim_ps.sh` (A9)
+See [`platforms/README.md`](platforms/README.md): copy `basic_cortexM`, edit `cosim_main.cpp` and `firmware/`, add a `.env` file, run `./scripts/run_platform.sh <name>`.

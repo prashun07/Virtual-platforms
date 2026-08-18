@@ -1,18 +1,21 @@
 /*
- * Expected pin-level interface for user SystemC peripherals.
+ * peripheral_if.h
  *
- * Your model (e.g. Timer) should expose these ports. The cosim adapter
- * drives them from QEMU MMIO transactions — it does not implement the model.
+ * Copyright (c) 2026 Prashun Jha. All rights reserved.
  *
- *   sc_in<bool>          clock
- *   sc_in<bool>          reset
- *   sc_in<bool>          read_en
- *   sc_in<bool>          write_en
- *   sc_in<sc_uint<32>>   data_in
- *   sc_in<sc_uint<32>>   address      // byte offset within peripheral
- *   sc_out<sc_uint<32>>  data_out
- *   sc_out<bool>         intr1        // optional
- *   sc_out<bool>         intr2        // optional
+ * @author Prashun Jha
+ *
+ * Pin-level bus contract for user SystemC peripheral models.
+ *
+ * Defines PeripheralBusSignals (sc_signal bundle) and bind_peripheral(), a
+ * template helper that connects a user module's ports to those signals and
+ * to the platform clock. Cosim adapters (TlmPinBridge, MmioAdapter) drive
+ * the bus side; the user model (e.g. Timer) implements register logic on
+ * the peripheral side.
+ *
+ * Expected user module ports:
+ *   clock, reset, read_en, write_en, data_in, address, data_out
+ *   intr1, intr2 (optional interrupt outputs)
  */
 
 #ifndef PERIPHERAL_IF_H
@@ -20,6 +23,10 @@
 
 #include <systemc.h>
 
+/*
+ * Shared signal bundle between cosim adapter and user peripheral.
+ * Platform code instantiates one bundle per peripheral instance.
+ */
 struct PeripheralBusSignals {
     sc_signal<bool>          reset;
     sc_signal<bool>          read_en;
@@ -32,7 +39,9 @@ struct PeripheralBusSignals {
 };
 
 /*
- * Bind a user module that matches the port names above.
+ * Bind a user module that exposes the standard peripheral port names.
+ * Connects clock plus all bus and interrupt signals to the shared bundle.
+ *
  * Example:
  *   PeripheralBusSignals bus;
  *   Timer dut("Timer");
