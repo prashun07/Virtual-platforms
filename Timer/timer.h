@@ -4,7 +4,7 @@
 #include <systemc.h>
 #include "register.h"
 
-/* Memory map (byte offsets) — keep in sync with qemu_soc/firmware/timer_regs.h */
+/* Memory map (byte offsets) — keep in sync with platform firmware timer_regs.h */
 static constexpr uint32_t REG_CTRL  = 0x00;
 static constexpr uint32_t REG_VALUE = 0x04;
 static constexpr uint32_t REG_CMP   = 0x08;
