@@ -14,3 +14,4 @@ qemu_soc/firmware/*.o
 qemu_soc/firmware/*.elf
 qemu_soc/firmware/*.bin
 qemu_soc/platform/cosim_platform
+platforms/*/cosim_platform

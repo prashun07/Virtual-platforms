@@ -1,5 +1,17 @@
 # SystemC Model Setup Instructions
 
+## Repository layout
+
+```text
+systemc_model/
+  scripts/          # build_qemu.sh, run_platform.sh, run_cosim.sh  ← run from here
+  platforms/        # cosim_main + .env configs (links model + qemu_soc)
+  Timer/            # user SystemC IP (no QEMU dependency)
+  qemu_soc/         # QEMU patches, wrapper, firmware (no user model)
+```
+
+Models and cosim bridge are **independent**. A platform under `platforms/` connects them at run time.
+
 ## Step 1: Build SystemC from source
 
 ```bash
@@ -18,7 +30,7 @@ make -j$(sysctl -n hw.ncpu) && make install
 ```bash
 export SYSTEMC_HOME=$HOME/systemc/install
 export SYSTEMC_INCLUDE=$SYSTEMC_HOME/include
-export SYSTEMC_LIBDIR=$SYSTEMC_HOME/lib
+export SYSTEMC_LIBDIR=$HOME/systemc/install/lib
 export QEMU_PREFIX=$HOME/qemu-systemc
 export PATH="$QEMU_PREFIX/bin:$PATH"
 ```
@@ -52,13 +64,14 @@ Architecture (your model stays in SystemC; QEMU only provides CPU + bridge):
 
 | Piece | Role |
 |-------|------|
-| `qemu/remote_mmio.*` | Generic MMIO↔socket bridge (no model logic) |
-| `qemu/systemc_soc.c` | Cortex-M3 machine, PL bridge @ `0x40000000` |
-| `qemu/systemc_ps.c` | Cortex-A9 PS (UART, GIC, DDR), PL @ `0xF0000000` |
-| `wrapper/` | TLM sockets + `TlmPinBridge` to user pin-level models |
-| `platform/cosim_main.cpp` | CosimServer → TlmAddressMap → Timer |
-| `firmware/` | M-profile baremetal |
-| `firmware_ps/` | A-profile baremetal |
+| `qemu_soc/qemu/remote_mmio.*` | Generic MMIO↔socket bridge (no model logic) |
+| `qemu_soc/qemu/systemc_soc.c` | Cortex-M3 machine, PL bridge @ `0x40000000` |
+| `qemu_soc/qemu/systemc_ps.c` | Cortex-A9 PS (UART, GIC, DDR), PL @ `0xF0000000` |
+| `qemu_soc/wrapper/` | TLM sockets + `TlmPinBridge` to user pin-level models |
+| `platforms/timer/` | `cosim_main.cpp` — CosimServer → TlmAddressMap → Timer |
+| `platforms/*.env` | Platform config (model path, machine, firmware) |
+| `qemu_soc/firmware/` | M-profile baremetal |
+| `qemu_soc/firmware_ps/` | A-profile baremetal |
 
 ### TLM integration
 
@@ -75,29 +88,30 @@ brew install qemu arm-none-eabi-gcc ninja pkg-config glib pixman
 Homebrew QEMU does not include the bridge. Build the local QEMU once:
 
 ```bash
-cd qemu_soc
+cd systemc_model
 chmod +x scripts/*.sh
 ./scripts/build_qemu.sh
 ```
 
-## Step 5: Build the baremetal image
+## Step 5: Build the baremetal image (optional — run script builds automatically)
 
 ```bash
-cd qemu_soc/firmware
-make
+make -C qemu_soc/firmware
 # produces timer_fw.elf / timer_fw.bin
 ```
 
 ## Step 6: Run cosimulation
 
+From **`systemc_model/`**:
+
 ```bash
-cd qemu_soc
 ./scripts/run_cosim.sh
+# equivalent: ./scripts/run_platform.sh timer_m3
 ```
 
 This will:
 
-1. Build firmware + SystemC platform (links `Timer/timer.h` as-is)
+1. Build firmware + SystemC platform (links `Timer/` via `platforms/timer/`)
 2. Start the SystemC side (listens on `/tmp/systemc_cosim.sock`)
 3. Start QEMU `systemc-soc` with the baremetal ELF
 
@@ -123,8 +137,8 @@ ALL TESTS COMPLETED
 ### Cortex-A9 processing system (`systemc-ps`)
 
 ```bash
-cd qemu_soc
 ./scripts/run_cosim_ps.sh
+# equivalent: ./scripts/run_platform.sh timer_a9
 ```
 
 | Address    | Region |
@@ -133,10 +147,12 @@ cd qemu_soc
 | 0x10009000 | PL011 UART |
 | 0xF0000000 | PL window → SystemC TLM (Timer) |
 
-### Connecting a new custom model later
+### Adding a new custom model
 
-1. **Pin-level** (like Timer): add `TlmPinBridge`, `map_region()`, bind in `cosim_main.cpp`
-2. **Native TLM**: bind your `tlm_target_socket` to `TlmAddressMap::device_socket` (or add a second region)
-3. See `wrapper/peripheral_if.h` for the legacy pin contract
-4. Rebuild: `make -C qemu_soc/platform`
-5. Run `./scripts/run_cosim.sh` (M3) or `./scripts/run_cosim_ps.sh` (A9)
+1. Create your IP directory (e.g. `MyPeriph/`) with a standalone testbench
+2. Copy `platforms/_template/` → `platforms/my_periph/`, edit `cosim_main.cpp`
+3. Add `platforms/my_periph_m3.env` (see `platforms/README.md`)
+4. Add matching firmware under `qemu_soc/firmware/`
+5. Run `./scripts/run_platform.sh my_periph_m3`
+
+No changes to `qemu_soc/wrapper/` are required for pin-level models that follow `peripheral_if.h`.
